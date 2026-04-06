@@ -548,13 +548,21 @@ async function renderStudentPage(req, res) {
           </form>
         </section>
 
-        <section>
+        <section id="suggestedSongsSection">
           <h2 class="section-title">Suggested Songs</h2>
           <div class="song-grid">${songsMarkup || '<p class="no-results">No songs yet. Be the first to suggest one.</p>'}</div>
         </section>
       </main>
 
-      <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+      ${popupMessage ? `
+      <div id="suggestionPopup" class="success-popup" role="dialog" aria-modal="true" aria-labelledby="suggestionPopupTitle" tabindex="0">
+        <div class="success-popup-card">
+          <p class="success-popup-eyebrow">Song Suggested</p>
+          <h2 id="suggestionPopupTitle">Suggestion saved successfully</h2>
+          <p class="success-popup-message">${escapeHtml(popupMessage)}</p>
+          <p class="success-popup-note">Tap anywhere to close, then you will jump to Suggested Songs.</p>
+        </div>
+      </div>` : ""}
 
       <script>
         window.pageToastMessage = ${JSON.stringify(popupMessage)};
