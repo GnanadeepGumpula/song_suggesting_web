@@ -34,7 +34,7 @@ const storage = multer.diskStorage({
   },
   filename: (_req, file, cb) => {
     const ext = path.extname(file.originalname || "").toLowerCase();
-    const safeExt = ext || (file.mimetype.startsWith("image/") ? ".jpg" : ".mp3");
+    const safeExt = ext || (file.mimetype.startsWith("video/") ? ".mp4" : file.mimetype.startsWith("image/") ? ".jpg" : ".mp3");
     cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${safeExt}`);
   }
 });
@@ -194,6 +194,54 @@ function getSpotifyEmbedUrl(source) {
   return `https://open.spotify.com/embed/track/${id}`;
 }
 
+function isKnownMusicPlatformUrl(source) {
+  if (!isHttpUrl(source)) {
+    return false;
+  }
+
+  const parsedUrl = new URL(source);
+  const host = parsedUrl.hostname.replace(/^www\./, "").toLowerCase();
+
+  const supportedDomainSuffixes = [
+    "instagram.com",
+    "instagr.am",
+    "youtube.com",
+    "youtu.be",
+    "music.youtube.com",
+    "spotify.com",
+    "music.apple.com",
+    "apple.com",
+    "itunes.apple.com",
+    "music.amazon.com",
+    "amazonmusic.com",
+    "tidal.com",
+    "soundcloud.com",
+    "deezer.com",
+    "qobuz.com",
+    "pandora.com",
+    "siriusxm.com",
+    "idagio.com",
+    "bandcamp.com",
+    "liveone.com",
+    "slacker.com",
+    "napster.com",
+    "zedge.net",
+    "mobiles24.co",
+    "tones7.com",
+    "mytinyphone.com",
+    "audiko.net",
+    "audiko.com",
+    "inshot.com",
+    "garageringtones.com",
+    "mobilevue.com",
+    "aggyapps.com",
+    "zringtones.net",
+    "zringtones.com"
+  ];
+
+  return supportedDomainSuffixes.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
+}
+
 function getMediaKind(source) {
   if (!source) {
     return { kind: "none", downloadable: false };
@@ -231,6 +279,10 @@ function getMediaKind(source) {
     return embedUrl ? { kind: "spotify", embedUrl, downloadable: false } : { kind: "unknown", downloadable: false };
   }
 
+  if (isKnownMusicPlatformUrl(source)) {
+    return { kind: "external", downloadable: false };
+  }
+
   if (/\.(mp4|webm|ogv|mov)$/i.test(pathname)) {
     return { kind: "video", downloadable: true };
   }
@@ -239,7 +291,7 @@ function getMediaKind(source) {
     return { kind: "audio", downloadable: true };
   }
 
-  return { kind: "unknown", downloadable: false };
+  return { kind: "external", downloadable: false };
 }
 
 function prettifyText(value) {
@@ -381,6 +433,15 @@ function renderMediaPlayer(song, index) {
       </div>`;
   }
 
+  if (media.kind === "external") {
+    return `
+      <div class="player-wrap">
+        <div class="song-actions">
+          <a class="download-btn" href="${safeSongUrl}" target="_blank" rel="noopener noreferrer">Open Link</a>
+        </div>
+      </div>`;
+  }
+
   return `<p class="no-song">Unsupported media source. Please upload the file instead.</p>`;
 }
 
@@ -474,7 +535,7 @@ async function renderStudentPage(req, res) {
   const errorType = req.query.error || "";
   const errorMessage =
     errorType === "unsupported-url"
-      ? "Unsupported URL. Please download the file and upload it instead."
+      ? "Unsupported URL. Use a valid http(s) song link (Spotify, YouTube, Instagram, Apple Music, SoundCloud, etc.) or upload a song file."
       : errorType === "missing-song"
         ? "Please provide Song URL or Upload Song."
         : errorType === "save-failed"
@@ -521,20 +582,8 @@ async function renderStudentPage(req, res) {
               <input type="text" name="title" maxlength="80" placeholder="Enter song title or leave blank" />
             </label>
             <label>
-              Cover Image URL
-              <input type="url" name="coverUrl" placeholder="https://example.com/cover.jpg" />
-            </label>
-            <label>
-              Upload Cover Image
-              <div class="drop-zone" data-drop-zone>
-                <input type="file" name="coverFile" accept="image/*" data-drop-input />
-                <p class="drop-zone-title">Drag and drop cover image here, or click to browse</p>
-                <p class="drop-zone-file" data-drop-file>No file selected</p>
-              </div>
-            </label>
-            <label>
               Song URL
-              <input type="url" name="songUrl" placeholder="https://example.com/song.mp3, YouTube, Spotify, or video link" />
+              <input type="url" name="songUrl" placeholder="Spotify, YouTube, Instagram, Apple Music, SoundCloud, ringtone links, or direct media URL" />
             </label>
             <label>
               Upload Song
@@ -669,10 +718,7 @@ app.get("/download-song", async (req, res) => {
 
 app.post(
   "/student/:roll/songs",
-  upload.fields([
-    { name: "coverFile", maxCount: 1 },
-    { name: "songFile", maxCount: 1 }
-  ]),
+  upload.fields([{ name: "songFile", maxCount: 1 }]),
   async (req, res) => {
     let students = [];
 
@@ -691,26 +737,18 @@ app.post(
     }
 
     const titleInput = (req.body.title || "").trim();
-    const coverUrl = (req.body.coverUrl || "").trim();
     const songUrl = (req.body.songUrl || "").trim();
-    const coverFile = req.files?.coverFile?.[0];
     const songFile = req.files?.songFile?.[0];
     const mediaType = songUrl ? getMediaKind(songUrl) : { kind: "none" };
-
-    if (coverUrl && !isHttpUrl(coverUrl)) {
-      res.redirect(`/student/${student.roll}?error=unsupported-url`);
-      return;
-    }
 
     if (songUrl && mediaType.kind === "unknown") {
       res.redirect(`/student/${student.roll}?error=unsupported-url`);
       return;
     }
 
-    const image = coverFile ? `/uploads/${coverFile.filename}` : coverUrl;
     const playableSong = songFile ? `/uploads/${songFile.filename}` : songUrl;
     const title = titleInput || deriveSongTitle(playableSong, songFile);
-    const resolvedImage = image || deriveCoverFromMedia(playableSong, songFile, title);
+    const resolvedImage = deriveCoverFromMedia(playableSong, songFile, title);
 
     if (!playableSong) {
       res.redirect(`/student/${student.roll}?error=missing-song`);
